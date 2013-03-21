@@ -1,0 +1,66 @@
+#!/usr/bin/env python
+
+import socket
+import select
+import struct
+import json
+import random
+
+class Buffer():
+        def __init__(self):
+                self.read  = ''
+                self.write = ''
+
+def parseBuffer(buf):
+    if len(buf.read) > 10:
+        buf.write += buf.read
+        buf.read = ''
+
+# Create a server socket and append it to our sockets list
+server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+server.setblocking(0)
+server.bind(('', 1337))
+server.listen(5)
+
+# Set aside a buffer pair for this socket
+buffers = {}
+buffers[server] = Buffer()
+
+while 1:
+        interest_write = filter(lambda b: len(buffers[b].write) > 0, buffers.keys())
+        ready_read, ready_write, in_error = select.select(buffers.keys(), interest_write, [])
+
+        # Send pending data and remove that data from the buffer
+        for sock in ready_write:
+
+                hdr = buffers[sock].write[:4]
+                m = buffers[sock].write[4:]
+                version, type, paylen = struct.unpack('!BBH', hdr)
+
+                if type == 1:
+                        responce = m
+                if type == 2:
+                        responce = json.dumps(random.random())
+
+                Rversion = 1
+                Rtype = 0
+                Rpaylen = len(responce)
+                Rdata = struct.pack('!BBH', Rversion, Rtype, Rpaylen)
+                sent = sock.send(Rdata + responce)
+                buffers[sock].write = buffers[sock].write[sent:]
+
+        for sock in ready_read:
+                if sock != server:
+                        buf = sock.recv(4096)
+                        if len(buf):
+                                buffers[sock].read += buf
+                                parseBuffer(buffers[sock])
+                        else:
+                                del buffers[sock]
+                                print "CLIENT CLOSED CONN"
+                else:
+                        incoming, address = server.accept()
+                        incoming.setblocking(0)
+                        buffers[incoming] = Buffer()
+                        print "ACCEPTED CONNECTION from ", address
